@@ -1,4 +1,3 @@
-var pubsub =  Pubsub.create();
 var Router = ReactRouter; // 由于是html直接引用的库，所以 ReactRouter 是以全局变量的形式挂在 window 上
 var Route = ReactRouter.Route; 
 var RouteHandler = ReactRouter.RouteHandler;
@@ -6,6 +5,8 @@ var Link = ReactRouter.Link;
 var StateMixin = ReactRouter.State;
 var browserHistory = ReactRouter.browserHistory
 
+var pubsub_token;
+var globalChart;
 // 时间格式化
 Date.prototype.format = function(fmt)   
 { // author: meizz
@@ -28,10 +29,25 @@ Date.prototype.format = function(fmt)
 
 // 一天毫秒数 86400000
 
+var data_search=function(day){
+	if(day){
+		var period=day*86400000;
+		$("#inpstart").val(new Date(new Date().getTime()-period).format("yyyy-MM-dd"));
+		$("#inpend").val(new Date(new Date().getTime()-86400000).format("yyyy-MM-dd"));
+	}
+	var t=$("#inpstart").val()+','+$("#inpend").val();
+	if(t.length<12) return;
+
+	PubSub.publish('search',t);
+	console.log('Search事件');
+}
+
+// 功能分析，图表支持
+var func_item='nceApps';// 图表的初始值
 
 $(function(){
 	var timer;
-	var overviewChart;
+
 	   laydate({
            elem: '#inpstart'
        });
@@ -40,14 +56,16 @@ $(function(){
        });
 		$("#inpstart").val(new Date(new Date().getTime()-864000000).format("yyyy-MM-dd"));
 		$("#inpend").val(new Date(new Date().getTime()-86400000).format("yyyy-MM-dd"));
-	// --------search
-	$("#search").click(function(){
-		var t=$("#inpstart").val()+','+$("#inpend").val();
-		if(t.length<12) return;
+// // --------search
+// $("#search").click(function(){
+// var t=$("#inpstart").val()+','+$("#inpend").val();
+// if(t.length<12) return;
+//	
+// pubsub.publish('search',null,t);
+// console.log('Search事件');
+// });
 	
-		pubsub.publish('search',null,t);
-		console.log('Search事件');
-	});
+
 	
 var Overviewtable = React.createClass({
 	  getInitialState: function() {
@@ -109,7 +127,7 @@ var Overviewtable = React.createClass({
 						        data: realtimeData,
 						    }]
 						};
-					overviewChart.setOption(option);
+					globalChart.setOption(option);
 			  }.bind(this),
 			  error:function(){}
 		  });
@@ -117,20 +135,20 @@ var Overviewtable = React.createClass({
 
 	  },
 	  componentDidMount: function() {
-		  $("#search_div").hide();
-		  pubsub.publish('datatitle',null,'数据总览' );
+		  $(".search_div").hide();
+		  PubSub.publish('datatitle','数据总览' );
 		  this.loadDataCountFromServer();
 		  this.setState({
 				realtimeData:[], 
-		  })
-		  overviewChart = echarts.init(document.getElementById('graph3'));
-		  console.log(this.getRealtimeData);
+		  });
+			  globalChart = echarts.init(document.getElementById('graph3'));
 		  this.getRealtimeData();
 		  timer=setInterval(this.getRealtimeData,120000);
 
 	  },
 	 
 	  componentWillUnmount: function () {
+		  console.log("组件开始被卸载--------------------");
 		  window.clearInterval(timer)
 	  },
 	  loadDataCountFromServer: function(){
@@ -151,6 +169,8 @@ var Overviewtable = React.createClass({
 	  },
 	 render: function() {
 	   return (<div>
+		 		<div id="graph3" className="graph1"></div>
+		 			<hr /> 
 				   <table className="table">
 						<thead>
 							<tr>
@@ -190,8 +210,7 @@ var Overviewtable = React.createClass({
 						</tr>
 						</tbody>
 					</table>
-					<hr /> 
-					 <div id="graph3" className="graph1"></div>
+				
 				</div>
 				)
 	 },
@@ -212,9 +231,9 @@ var Usertable = React.createClass({
 	  },
 		
 	  componentDidMount: function() {
-		  $("#search_div").show();
-		  pubsub.publish('datatitle',null,'用户分析' );
-		this.pubsub_token = pubsub.subscribe('search', function (context, time) {
+		  
+		  PubSub.publish('datatitle','用户分析' );
+		pubsub_token = PubSub.subscribe('search', function (context, time) {
 			var t=time.split(',');
 				this.setState({
 	  	        timeStart: t[0],
@@ -225,9 +244,11 @@ var Usertable = React.createClass({
 		    this.loadDataCountFromServer();
 		    }.bind(this));
 	    this.loadDataCountFromServer();
+	    $(".search_div").show();
 	  },
 	  componentWillUnmount: function () {
-		  pubsub.unsubscribe(this.pubsub_token);
+		  console.log("组件开始被卸载--------------------");
+		  PubSub.unsubscribe('search');
 	  },
 	  loadDataCountFromServer: function(){
 		  console.log('loadDataCountFromServer-----------');
@@ -241,6 +262,56 @@ var Usertable = React.createClass({
 			  	        data:rdata
 			  	      });
 				  console.log(this.state.data);
+				  var realtimeData=rdata.map(function(d) {
+						return {
+							name:d.date,
+							value:[
+							   new Date(d.date),
+							   d.rechargeUsers
+							]
+						}
+					  });
+						var  option = {
+							    title: {
+							        text: '充值用户人数'
+							    },
+							    tooltip: {
+							        trigger: 'axis',
+							        formatter: function (params) {
+							            params = params[0];
+							            var date = new Date(params.name);
+							            return date.format("yyyy-MM-dd hh:mm:ss") +' : ' + params.value[1];
+							        },
+							        axisPointer: {
+							            animation: false
+							        }
+							    },
+							    xAxis: {
+							        type: 'time',
+							        splitLine: {
+							            show: true
+							        }
+							    },
+							    yAxis: {
+							        type: 'value',
+							        boundaryGap: [0, '100%'],
+							        min:0,
+							        splitLine: {
+							            show: true
+							        }
+							    },
+							    series: [{
+							        name: '模拟数据',
+							        type: 'line',
+							        showSymbol: false,
+							        hoverAnimation: false,
+							        data: realtimeData,
+							    }]
+							};
+						globalChart = echarts.init(document.getElementById('graph3'));
+						globalChart.setOption(option);
+				  
+				  
 			  }.bind(this),
 			  error:function(){}
 		  });
@@ -261,7 +332,10 @@ var Usertable = React.createClass({
 				}); 
 		 
 	   return (
-			   <table className="table">
+			<div>
+			 <div id="graph3" className="graph1"></div>
+			 <hr/> 
+			  <table className="table">
 		
 				<thead>
 					<tr>
@@ -274,7 +348,9 @@ var Usertable = React.createClass({
 				<tbody>
 					{nodes}
 				</tbody>
-			</table>
+			 </table>
+			
+		   </div>
 	   );
 	 },
 
@@ -292,9 +368,9 @@ var Financetable = React.createClass({
 	  },
 	  
 	  componentDidMount: function() {
-		  $("#search_div").show();
-		  pubsub.publish('datatitle',null,'金额分析' );
-		this.pubsub_token = pubsub.subscribe('search', function (context, time) {
+		  
+		  PubSub.publish('datatitle','金额分析' );
+		pubsub_token = PubSub.subscribe('search', function (context, time) {
 			var t=time.split(',');
 				this.setState({
 	  	        timeStart: t[0],
@@ -305,9 +381,11 @@ var Financetable = React.createClass({
 		    this.loadDataCountFromServer();
 		    }.bind(this));
 	    this.loadDataCountFromServer();
+	    $(".search_div").show();
 	  },
 	  componentWillUnmount: function () {
-		  pubsub.unsubscribe(this.pubsub_token);
+		  console.log("组件开始被卸载--------------------");
+		  PubSub.unsubscribe('search');
 	  },
 	  loadDataCountFromServer: function(){
 		  console.log('loadDataCountFromServer-----------');
@@ -321,6 +399,54 @@ var Financetable = React.createClass({
 			  	        data:rdata
 			  	      });
 				  console.log(this.state.data);
+				  var realtimeData=rdata.map(function(d) {
+						return {
+							name:d.date,
+							value:[
+							   new Date(d.date),
+							   d.rechargeMoney
+							]
+						}
+					  });
+						var  option = {
+							    title: {
+							        text: '用户日充值金额'
+							    },
+							    tooltip: {
+							        trigger: 'axis',
+							        formatter: function (params) {
+							            params = params[0];
+							            var date = new Date(params.name);
+							            return date.format("yyyy-MM-dd hh:mm:ss") +' : ' + params.value[1];
+							        },
+							        axisPointer: {
+							            animation: false
+							        }
+							    },
+							    xAxis: {
+							        type: 'time',
+							        splitLine: {
+							            show: true
+							        }
+							    },
+							    yAxis: {
+							        type: 'value',
+							        boundaryGap: [0, '100%'],
+							        min:0,
+							        splitLine: {
+							            show: true
+							        }
+							    },
+							    series: [{
+							        name: '模拟数据',
+							        type: 'line',
+							        showSymbol: false,
+							        hoverAnimation: false,
+							        data: realtimeData,
+							    }]
+							};
+						globalChart = echarts.init(document.getElementById('graph3'));
+						globalChart.setOption(option);
 			  }.bind(this),
 			  error:function(){}
 		  });
@@ -330,8 +456,8 @@ var Financetable = React.createClass({
 			  type:'POST',
 			  success:function(rdata){
 				  this.setState({
-			  	        overview:JSON.parse(rdata)
-			  	      });
+					  overview:JSON.parse(rdata)
+		  	      	});
 				  console.log(this.state.overview);
 			  }.bind(this),
 			  error:function(){}
@@ -357,54 +483,94 @@ var Financetable = React.createClass({
 						</tr>	
 					);
 				}); 
-		 
-	   return (<div>
-			   <table className="table">
-		
-				<thead>
-					<tr>
-						<th>代金卷发放总用户</th>
-						<th>代金卷发放总次数</th>
-						<th>代金卷发放总金额</th>
-						<th title="收到代金卷后还愿意充值的用户">回流用户</th>
-						<th>回流用户消费金额</th>
-					
-					</tr>
-				</thead>
-				<tbody>
-					<td>{this.state.overview.a_distributedVoucherUsers}</td>
-					<td>{this.state.overview.a_distributedVoucherTimes}</td>
-					<td>{this.state.overview.a_distributedVoucherMoney}</td>
-					<td>{this.state.overview.a_rebackUsers}</td>
-					<td>{this.state.overview.a_rebackMoney}</td>
-				</tbody>
-			</table>
-			<hr></hr>
-			   <table className="table">
+			return (<div>
+			   			<div id="graph3" className="graph1"></div>
+			   			<hr/> 
+					   <table className="table">
 				
-				<thead>
-					<tr>
-						<th>时间</th>
-						<th>充值人数</th>
-						<th>充值次数</th>
-						<th>充值金额</th>
-						<th>消费真实金额</th>
-						<th>发放代金卷人数</th>
-						<th>发放代金卷次数</th>
-						<th>发放代金卷金额</th>
-						<th>消费代金卷金额</th>
-						<th title="消费总额=消费真实金额+消费代金卷金额">消费总额</th>
-					</tr>
-				</thead>
-				<tbody>
-					{nodes}
-				</tbody>
-			</table>
-			</div>
-	   );
+						<thead>
+							<tr>
+								<th>代金卷发放总用户</th>
+								<th>代金卷发放总次数</th>
+								<th>代金卷发放总金额</th>
+								<th title="收到代金卷后还愿意充值的用户">回流用户</th>
+								<th>回流用户消费金额</th>
+							
+							</tr>
+						</thead>
+						<tbody>
+							<td>{this.state.overview.a_voucherUsers}</td>
+							<td>{this.state.overview.a_voucherTimes}</td>
+							<td>{this.state.overview.a_voucherMoney}</td>
+							<td>{this.state.overview.a_rebackUsers}</td>
+							<td>{this.state.overview.a_rebackMoney}</td>
+						</tbody>
+					</table>
+					   <table className="table">
+						
+						<thead>
+							<tr>
+								<th>时间</th>
+								<th>充值人数</th>
+								<th>充值次数</th>
+								<th>充值金额</th>
+								<th>消费真实金额</th>
+								<th>发放代金卷人数</th>
+								<th>发放代金卷次数</th>
+								<th>发放代金卷金额</th>
+								<th>消费代金卷金额</th>
+								<th title="消费总额=消费真实金额+消费代金卷金额">消费总额</th>
+							</tr>
+						</thead>
+						<tbody>
+							{nodes}
+						</tbody>
+					</table>
+					
+					</div>
+			   );
 	 },
 
 })
+
+
+	var  func_option = {
+	    title: {
+	        text: '日创建容器数'
+	    },
+	    tooltip: {
+	        trigger: 'axis',
+	        formatter: function (params) {
+	            params = params[0];
+	            var date = new Date(params.name);
+	            return date.format("yyyy-MM-dd hh:mm:ss") +' : ' + params.value[1];
+	        },
+	        axisPointer: {
+	            animation: false
+	        }
+	    },
+	    xAxis: {
+	        type: 'time',
+	        splitLine: {
+	            show: true
+	        }
+	    },
+	    yAxis: {
+	        type: 'value',
+	        boundaryGap: [0, '100%'],
+	        min:0,
+	        splitLine: {
+	            show: true
+	        }
+	    },
+	    series: [{
+	        name: '模拟数据',
+	        type: 'line',
+	        showSymbol: false,
+	        hoverAnimation: false,
+	        data: [],
+	    }]
+	};
 
 
 var Functiontable = React.createClass({
@@ -418,9 +584,9 @@ var Functiontable = React.createClass({
   },
 	
   componentDidMount: function() {
-	  $("#search_div").show();
-	  pubsub.publish('datatitle',null,'功能分析' );
-	this.pubsub_token = pubsub.subscribe('search', function (context, time) {
+	 
+	  PubSub.publish('datatitle','功能分析' );
+	pubsub_token = PubSub.subscribe('search', function (context, time) {
 		var t=time.split(',');
 			this.setState({
   	        timeStart: t[0],
@@ -428,14 +594,16 @@ var Functiontable = React.createClass({
   	      });
 		  
 		console.log("收到消息------"+time);
-	    this.loadDataCountFromServer();
+	    this.loadDataCountFromServer(func_item);
 	    }.bind(this));
-    this.loadDataCountFromServer();
+    this.loadDataCountFromServer(func_item);
+    $(".search_div").show();
   },
   componentWillUnmount: function () {
-	  pubsub.unsubscribe(this.pubsub_token);
+	  console.log("组件开始被卸载--------------------");
+	  PubSub.unsubscribe('search');
   },
-  loadDataCountFromServer: function(){
+  loadDataCountFromServer: function(item){
 	  console.log('loadDataCountFromServer-----------');
 	  console.log(this.state.timeStart+','+this.state.timeEnd);
 	  $.ajax({ url:'../data/function', 
@@ -446,11 +614,217 @@ var Functiontable = React.createClass({
 			  this.setState({
 		  	        data:rdata
 		  	      });
-			  console.log(this.state.data);
+			  
+			  this.setECharts(item);
+			 
 		  }.bind(this),
 		  error:function(){}
 	  });
-	 
+  },
+  
+  setECharts:function(item){
+	  func_item=item;
+	  var realtimeData;
+	  var rdata=this.state.data;
+	  switch (item) {
+		case 'nceUsers':
+			func_option.title.text='NCE消费人数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nceUsers
+					]
+				}
+			  });
+			break;
+		case 'nceApps':
+			func_option.title.text='NCE产生消费的实例数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nceApps
+					]
+				}
+			  });
+			break;
+		case 'nceMoney':
+			func_option.title.text='NCE消费金额';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nceMoney
+					]
+				}
+			  });
+			break;
+		case 'nseUsers':
+			func_option.title.text='NSE消费人数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nseUsers
+					]
+				}
+			  });
+			break;
+		case 'nseApps':
+			func_option.title.text='NSE产生消费的实例数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nseApps
+					]
+				}
+			  });
+			break;
+		case 'nseMoney':
+			func_option.title.text='NSE消费金额';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nseMoney
+					]
+				}
+			  });
+			break;
+		case 'rdsUsers':
+			func_option.title.text='RDS消费人数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.rdsUsers
+					]
+				}
+			  });
+			break;
+		case 'rdsApps':
+			func_option.title.text='RDS产生消费的实例数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.rdsApps
+					]
+				}
+			  });
+			break;
+		case 'rdsMoney':
+			func_option.title.text='RDS消费金额';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.rdsMoney
+					]
+				}
+			  });	
+			break;
+		case 'ncrUsers':
+			func_option.title.text='NCR消费人数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.ncrUsers
+					]
+				}
+			  });
+			break;
+		case 'ncrApps':
+			func_option.title.text='NCR产生消费的实例数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.ncrApps
+					]
+				}
+			  });
+			break;
+		case 'ncrMoney':
+			func_option.title.text='NCR消费金额';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.ncrMoney
+					]
+				}
+			  });
+			break;
+		case 'nlbUsers':
+			func_option.title.text='NLB消费人数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nlbUsers
+					]
+				}
+			  });
+			break;
+		case 'nlbApps':
+			func_option.title.text='NLB产生消费的实例数';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nlbApps
+					]
+				}
+			  });
+			break;
+		case 'nlbMoney':
+			func_option.title.text='NLB消费金额';
+			realtimeData=rdata.map(function(d) {
+				return {
+					name:d.date,
+					value:[
+					   new Date(d.date),
+					   d.nlbMoney
+					]
+				}
+			  });
+			break;
+
+
+		default:
+			break;
+		}
+	  
+
+	  func_option.series[0].data=realtimeData;
+	  globalChart = echarts.init(document.getElementById('graph3'));
+	  globalChart.setOption(func_option);
+	  $(".functionTitle").css("background-color","#FFF");
+	  $("."+item).css({"background-color":"#CBE7FF"});
+	  
+  },
+  handleClick:function(item,e){
+	  $(".functionTitle").css("background-color","#FFF");
+	  $("."+item).css({"background-color":"#CBE7FF"});
+	  this.setECharts(item);
   },
  render: function() {
 		if(!(this.state.data instanceof Array))
@@ -459,52 +833,56 @@ var Functiontable = React.createClass({
 			return(
 					<tr>
 						<td>{new Date(node.date).format("yyyy-MM-dd")}</td>
-						<td>{node.nceUsers}</td>
-						<td>{node.nceApps}</td>
-						<td>{node.nceMoney}</td>
-						<td>{node.nseUsers}</td>
-						<td>{node.nseApps}</td>
-						<td>{node.nseMoney}</td>
-						<td>{node.rdsUsers}</td>
-						<td>{node.rdsApps}</td>
-						<td>{node.rdsMoney}</td>
-						<td>{node.ncrUsers}</td>
-						<td>{node.ncrApps}</td>
-						<td>{node.ncrMoney}</td>
-						<td>{node.nlbUsers}</td>
-						<td>{node.nlbApps}</td>
-						<td>{node.nlbMoney}</td>
+						<td className='functionTitle nceUsers'>{node.nceUsers}</td>
+						<td className='functionTitle nceApps'>{node.nceApps}</td>
+						<td className='functionTitle nceMoney'>{node.nceMoney}</td>
+						<td className='functionTitle nseUsers'>{node.nseUsers}</td>
+						<td className='functionTitle nseApps'>{node.nseApps}</td>
+						<td className='functionTitle nseMoney'>{node.nseMoney}</td>
+						<td className='functionTitle rdsUsers'>{node.rdsUsers}</td>
+						<td className='functionTitle rdsApps'>{node.rdsApps}</td>
+						<td className='functionTitle rdsMoney'>{node.rdsMoney}</td>
+						<td className='functionTitle ncrUsers'>{node.ncrUsers}</td>
+						<td className='functionTitle ncrApps'>{node.ncrApps}</td>
+						<td className='functionTitle ncrMoney'>{node.ncrMoney}</td>
+						<td className='functionTitle nlbUsers'>{node.nlbUsers}</td>
+						<td className='functionTitle nlbApps'>{node.nlbApps}</td>
+						<td className='functionTitle nlbMoney'>{node.nlbMoney}</td>
 					</tr>	
 				);
 			}); 
 	 
    return (
+		   <div>
+			 <div id="graph3" className="graph1"></div>
+			 <hr/> 
 		   <table className="table">
-	
 			<thead>
 				<tr>
 					<th>时间</th>
-					<th title="容器人数">NCE人数</th>
-					<th title="产生消费的容器实例数">NCE实例数</th>
-					<th title="容器消费额">NCE消费额</th>
-					<th title="集群人数">NSE人数</th>
-					<th title="产生消费的集群实例数">NSE实例数</th>
-					<th title="集群消费额">NSE消费额</th>
-					<th title="数据库人数">RDS人数</th>
-					<th title="产生消费的数据库实例数">RDS实例数</th>
-					<th title="数据库消费额">RDS消费额</th>
-					<th title="缓存人数">NCR人数</th>
-					<th title="产生消费的缓存实例数">NCR实例数</th>
-					<th title="缓存消费额">NCR消费金额</th>
-					<th title="负载均衡人数">NLB人数</th>
-					<th title="产生消费的负载均衡实例数">NLB实例数</th>
-					<th title="负载均衡消费额">NLB消费额</th>
+					<th className='functionTitle nceUsers' onClick={this.handleClick.bind(this,'nceUsers')} title="容器人数">NCE人数</th>
+					<th className='functionTitle nceApps' onClick={this.handleClick.bind(this,'nceApps')} title="产生消费的容器实例数">NCE实例数</th>
+					<th className='functionTitle nceMoney' onClick={this.handleClick.bind(this,'nceMoney')} title="容器消费额">NCE消费额</th>
+					<th className='functionTitle nseUsers' onClick={this.handleClick.bind(this,'nseUsers')} title="集群人数">NSE人数</th>
+					<th className='functionTitle nseApps' onClick={this.handleClick.bind(this,'nseApps')} title="产生消费的集群实例数">NSE实例数</th>
+					<th className='functionTitle nseMoney' onClick={this.handleClick.bind(this,'nseMoney')} title="集群消费额">NSE消费额</th>
+					<th className='functionTitle rdsUsers' onClick={this.handleClick.bind(this,'rdsUsers')} title="数据库人数">RDS人数</th>
+					<th className='functionTitle rdsApps' onClick={this.handleClick.bind(this,'rdsApps')} title="产生消费的数据库实例数">RDS实例数</th>
+					<th className='functionTitle rdsMoney' onClick={this.handleClick.bind(this,'rdsMoney')} title="数据库消费额">RDS消费额</th>
+					<th className='functionTitle ncrUsers' onClick={this.handleClick.bind(this,'ncrUsers')} title="缓存人数">NCR人数</th>
+					<th className='functionTitle ncrApps' onClick={this.handleClick.bind(this,'ncrApps')} title="产生消费的缓存实例数">NCR实例数</th>
+					<th className='functionTitle ncrMoney' onClick={this.handleClick.bind(this,'ncrMoney')} title="缓存消费额">NCR消费金额</th>
+					<th className='functionTitle nlbUsers' onClick={this.handleClick.bind(this,'nlbUsers')} title="负载均衡人数">NLB人数</th>
+					<th className='functionTitle nlbApps' onClick={this.handleClick.bind(this,'nlbApps')} title="产生消费的负载均衡实例数">NLB实例数</th>
+					<th className='functionTitle nlbMoney' onClick={this.handleClick.bind(this,'nlbMoney')} title="负载均衡消费额">NLB消费额</th>
 				</tr>
 			</thead>
 			<tbody>
 				{nodes}
 			</tbody>
 		</table>
+	
+		</div>
    );
  },
 
@@ -517,8 +895,8 @@ var Othergraph = React.createClass({
 	  },
 
 	  componentDidMount: function() {
-		  $("#search_div").hide();
-		  pubsub.publish('datatitle',null,'其他分析' );
+		  $(".search_div").hide();
+		  PubSub.publish('datatitle','其他分析' );
 	    this.loadDataCountFromServer();
 	  },
 
@@ -622,7 +1000,7 @@ var Books = React.createClass({
 
 var Movies = React.createClass({
 	  componentDidMount: function () {
-	 // this.pubsub_token = pubsub.subscribe('datatitle', function (topic,
+	 // pubsub_token = pubsub.subscribe('datatitle', function (topic,
 		// title) {
 	    	
 	 // }.bind(this));
@@ -670,14 +1048,14 @@ var Datatitle=React.createClass({
 		    };
 		  },
   componentDidMount: function () {
-	    this.pubsub_token = pubsub.subscribe('datatitle', function (topic, title) {
+	    pubsub_token = PubSub.subscribe('datatitle', function (topic, title) {
 	    	  this.setState({
 	    	        datatitle: title
 	    	      });
 	    }.bind(this));
 	  },
 	  componentWillUnmount: function () {
-		  pubsub.unsubscribe('datatitle');
+		  PubSub.unsubscribe('search');
 	  },
  render: function() {
 	    return (
